@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+   <head>
+      <meta charset="UTF-8" />
+      <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>Document</title>
+      <link rel="stylesheet" href="./dist/css/main.css" />
+   </head>
+   <body>
+      <!--  
+         Adesso facciamo due build uno per il development e l'altro per la production
+         
+         In develompent vogliamo che il bundle venga prodotto velocemente e non ci
+         interessano le ottimizzazioni come terser (minificazione e compressioni) e 
+         altre cose che fanno aumentare il tempo per creare il bundle.
+
+         In production invece vogliamo queste ottimizzazioni.
+
+         Quindi il nostro webpack deve essere settato diversamente a secondo se 
+         siamo in development o in production mode.
+
+         Si può fare in diversi modi questa cosa. Il modo più facile di farlo è
+         creare due file di configurazione diversi. Prima avevamo solo
+         webpack.config.js
+         Adesso avremo
+         webpack.production.config.js
+         con mode:'production'
+         e
+         webpack.dev.config.js
+
+         in cui mettiamo mode:'development'
+
+         (Finora avevamo mode:'none')
+
+         Impostando mode:'production'  
+         vengono automaticamente forniti una serie di plugin (per vedere quali vai alla
+         documentazione ufficiale di webpack sotto la voce mode). Tra cui c'è Terse che
+         quindi in mode:'production'  non deve essere più installato nè configurato
+         Invece in 'development' mode viene usato sourcemap di defaullt che in production
+         non serve (perchè è una cosa che agevola il debug)
+
+         Inoltre puoi usare
+         process.env.NODE_ENV
+         nel codice js
+         process.env.NODE_ENV   torna la stringa 'production'  oppure 
+         'development'  cioè torna il valore di mode
+
+         In index.js ho aggiunto
+
+         if (process.env.NODE_ENV === 'production')
+            console.log('Production mode');
+         else if (process.env.NODE_ENV === 'development')
+            console.log('Development mode');
+
+
+         In webpack.production.config.js possiamo eliminare TerserPlugin() dalla
+         lista dei plugin e il require, dato che Terser in production c'è per default
+         (non serve neanche installarlo).
+         Inoltre possiamo eliminare watch:true
+         Metti minify:true dentro le option di HtmlWebpackPlugin per minificare l'html
+
+         In webpack.dev.config.js possiamo eliminare [contenthash] dal nome del bundle
+         perchè non serve il caching durante il development
+         Stessa cosa in 
+         assetModuleFilename
+         Possiamo eliminare Terser perchè in fase di sviluppo non serve minificare e
+         comprimere
+         Inoltre non c'è bisogno di mettere il css in un file separato, cioè usiamo
+         il plugin style-loader invece di MiniCssExtractPlugin perchè è più veloce.
+         Togli anche Babel se il tuo browser è moderno
+
+         MA ADESSO COME STABILIAMO QUANDO VOGLIAMO FARE LA BUILD PER 
+         IL DEVELOPMENT E QUANDO LA VOGLIAMO FARE PER LA PRODUCTION?
+
+         VAI in package.json e dentro mettici
+         "scripts": {
+            "build": "webpack --progress --profile --config webpack.production.config.js",
+            "dev":"webpack --progress --profile --config webpack.dev.config.js",
+         }
+
+         Il comando webpack prende automaticamente webpack.config.js ma se gli
+         cambiamo nome come in questo caso dobbiamo dirgli quale file prendere
+         con --config
+
+         Quindi con 
+         npm run build
+         farai la build in production mode
+         
+         e con
+         npm run dev
+         farai la build in development mode
+
+
+         In index.ejs ho anche modificato l'inclusione del tag <link> in
+         modo da fare l'inclusione solo quando sono in mode:'production'
+         (c'è un if)
+         (perchè in fase di 'development' uso lo style-loader e quindi il tag
+         style per includere il csss)
+
+         Nota che in questo progetto copio anche le immagini caricate senza
+         gli asset/resource ma con il classico <img src>  nell'html
+         Le immagini sono copiate con copy-webpack-plugin nella cartella dist
+         Solo che in produzione non funziona perchè ho aggiunto [hashcontent]
+         al nome dell'immagine,
+         mentre l'immagine referenziata in index.ejs e quindi nell'index.html
+         prodotto punta all'immagine senza l'hash
+
+         COME RISOLVERE:
+         Installo webpack-manifest-plugin per creare manifest.json
+         npm i webpack-manifest-plugin --save-dev
+
+         Lo importo con:
+         const { WebpackManifestPlugin } = require('webpack-manifest-plugin');
+         LO aggiungo alla lista dei plugin (dopo copy-webpack-plugin) con
+         new WebpackManifestPlugin({
+                //Percorso assoluto che serve per dire dove mettere il file manifest.json
+                fileName: pathM.resolve(__dirname, 'assets/img/manifest.json'),
+         /* publicPath: '/dist/' QUesto metterebbe /dist/ prima del percorso di sopra*/
+                filter: (file) => { const regEx = /img/;
+                                    return regEx.test(file.name);
+      },/*map: (file) => {
+                    if ('production' === env.NODE_ENV) {
+                        // Remove hash in manifest key
+                        file.name = file.name.replace(/(\.[a-f0-9]{32})(\..*)$/, '$2');
+                    }
+                    return file;
+                },*/
+            })
+
+         filename indica dove mettere il file manifest.json (puoi anche cambiare il nome)
+         In questo file verranno inseriti come oggetti la risorsa come nome della proprietà
+         e la risorsa trasformata (ad esempio con l'aggiunta dell'hash) come valore. 
+         Ad esempio avrò il seguente mapping:
+         {
+            "assets/img/natura.jpg": "./assets/img/natura.e1b203dd72abf2858773.jpg"
+         } 
+         filter è importante per dirgli di mettere in manifest.json solo il mapping delle
+         risorse presenti nella cartella img
+         Tramite map posso anche personalizzare questo mapping (in questo caso non serve).
+
+      Creato il file manifest.json posso dire  a html-webpack-plugin di leggere i valori
+      in questo file manifest.json usando l'opzione
+      templateParameters: {
+            'myJSON': productsJSON
+         }
+
+      dove productJSON è il contenuto del file manifest.json creato dal precedente 
+      manifest-plugin. Che devo leggere con 
+      productsJSON = require('./assets/img/manifest.json');
+      Il problema è la sincronizzazione, cioè devo fare la lettura di manifest.json
+      solo quando il precedente plugin ha creato il file manifest.json QUindi andrebbero
+      usati gli hook
+      Siccome non li so usare bene ho optato per leggere sin da subito il file
+      manifest.json con
+      productsJSON = require('./assets/img/manifest.json');
+      ma alla prima esecuzione il file non esiste quindi devo fare il build due volte.
+      Inoltre alla prima esecuzione del build , per evitare errori avrò un try-catch
+
+      try {
+   productsJSON = require('./assets/img/manifest.json');
+}
+catch (err) {
+   console.log(`Alla prima esecuzione il file manifest.json non esiste. Fare il build
+                due volte. Sarebbe meglio gestirlo in un altro modo. Ma non so
+                temporizzare l'esecuzione dei plugin. Cioè HTMLWebPackPlugin andrebbe
+                eseguito solo dopo che ManifestPlugin ha creato Manifest.json `)
+}
+
+    Non è il massimo:
+    HO CHIESTO A VIKTOR COME USARE GLI HOOK
+
+    Poi dal file index.ejs impostero il src delle immagini così:
+    <img src="<%= myJSON['assets/img/natura.jpg'] %>" alt="Natura.jpg" />
+
+    e nel file index.html prodotto (nella dist) avrò l'immagine con l'hash
+
+    Nota anche che in CopyWebpackPlugin ho usato DENTRO patterns
+    globOptions: {
+            ignore: [
+              // Ignore all `txt` files
+              "**/*.json",
+            ],
+          }
+
+    per escludere dalla copia nella dist il file manifest.json
+    Questo bordello va fatto solo in produzione, in developmente non serve perchè le 
+    immagini sono senza hash.
+    Un'altra cosa che dimenticavo è che nel file index.ejs devo gestire le immagini così
+     <img
+         src="<%= (process.env.NODE_ENV === 'production') ? myJSON['assets/img/natura.jpg'] : 'assets/img/natura.jpg' %>"
+         alt="Natura.jpg"
+      />
+
+   altrimenti ottengo un errore in fase di development
+   ALTERNATIVA PIU' FACILE:
+   L'alternativa è usare il plugin WebpackManifestPlugin anche in mode:'development' e così
+   nel file index.ejs non sarei costretto ad usare un if-else con lo svantaggio di
+   introdurre un plugin in più (e rallentare la build) (inoltre ricorda che c'è sempre il
+   fatto della doppia esecuzione)
+      -->
+
+      <img src="./assets/img/natura.jpg" alt="Natura.jpg" />
+      <img src="./assets/img/natale.jpg" alt="Natale.jpg" />
+      <button class="hello-world-button">Ciao</button>
+      <img id="asset-resource" />
+      <script src="./dist/js/bundle.js"></script>
+   </body>
+</html>
